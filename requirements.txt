@@ -1,4 +1,20 @@
+fastapi
+uvicorn[standard]
+python-multipart
 streamlit
 langchain
+langgraph
 pydantic
 numpy
+pypdf
+openpyxl
+pandas
+xlrd
+pymilvus
+python-dotenv
+httpx
+openai
+requests
+pytest
+# Optional: for agentic web_search tool (pip install ddgs)
+ddgs
