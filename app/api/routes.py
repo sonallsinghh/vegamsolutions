@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.handlers import handle_upload
 from app.agent.graph import run_agent_agentic_stream
+from app.core.errors import ServiceUnavailableError
 from app.core.session_store import append_message, get_history
 from app.core.upload_db import clear_all as clear_upload_db, get_all_paths as get_upload_paths
 from app.schemas.query import QueryRequest, QueryResponse
@@ -132,6 +133,8 @@ def post_query(body: QueryRequest) -> QueryResponse:
             answer = "I couldn't complete the request."
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ServiceUnavailableError as e:
+        raise HTTPException(status_code=503, detail=e.message) from e
     except Exception as e:
         logger.exception("Agent failed")
         raise HTTPException(status_code=500, detail=str(e)) from e

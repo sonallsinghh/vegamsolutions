@@ -14,6 +14,7 @@ from langgraph.graph import END, StateGraph
 from app.agent.llm import chat_with_tools_stream, hf_llm
 from app.agent.tools import AGENT_TOOLS, execute_tool
 from app.core.config import AGENT_MAX_TOKENS, MAX_AGENTIC_ROUNDS, MAX_ITERATIONS
+from app.core.errors import ServiceUnavailableError
 from app.services.retrieval_service import retrieve_context
 
 logger = logging.getLogger(__name__)
@@ -370,6 +371,8 @@ def run_agent_agentic_stream(question: str, history: list | None = None):
             return
         answer = "I couldn't complete the request (tool-calling requires OpenAI and OPENAI_API_KEY)."
         yield {"event": "done", "answer": answer, "tools_used": list(tools_used)}
+    except ServiceUnavailableError:
+        raise
     except Exception as e:
         logger.exception("[run_agent_agentic_stream] Agent stream failed")
         yield {"event": "error", "message": str(e)}

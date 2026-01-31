@@ -203,6 +203,16 @@ curl -X POST http://localhost:8000/mcp/tools/search_documents \
 
 For streaming, use `POST /query/stream`; events include `answer_delta`, `tool`, `done`, `error`.
 
+## Error handling
+
+When a required dependency is missing or unreachable, the API returns a clear response instead of crashing:
+
+- **503 Service Unavailable** – e.g. vector store or embeddings not configured. Example: if `MILVUS_URI` or `MILVUS_TOKEN` is empty in `.env`, the first query that triggers a search (e.g. asking a question) will fail with 503 and a message like *"Vector store is not configured. Please set MILVUS_URI and MILVUS_TOKEN in .env."* Similarly, a missing `HF_API_KEY` yields a 503 when embeddings are needed.
+- **500** – Other agent or server errors (logged; detail may be returned).
+- **400** – Invalid input (e.g. empty question).
+
+So if you forget to set Milvus or HF in `.env`, the app handles it with a 503 and a user-facing message.
+
 ## License and attribution
 
 Use `.env.example` as the single reference for required and optional environment variables. Do not commit `.env`.

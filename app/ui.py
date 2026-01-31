@@ -124,7 +124,7 @@ if st.button("New chat", key="new_chat"):
     st.session_state.messages = []
     st.rerun()
 
-st.caption(f"Session: `{st.session_state.chat_session_id[:8]}...` (history stored on server)")
+#st.caption(f"Session: `{st.session_state.chat_session_id[:8]}...` (history stored on server)")
 
 # Show previous messages (local display only)
 for msg in st.session_state.messages:

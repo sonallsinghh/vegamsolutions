@@ -19,6 +19,7 @@ from app.core.config import (
     MILVUS_URI,
     VECTOR_DIM,
 )
+from app.core.errors import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ def embed_texts(
     if not texts:
         return []
     if not HF_API_KEY:
-        raise ValueError(
-            "HF_API_KEY must be set in .env. Get a token from https://huggingface.co/settings/tokens"
+        raise ServiceUnavailableError(
+            "Embeddings service is not configured. Please set HF_API_KEY in .env."
         )
 
     headers = {
@@ -114,7 +115,9 @@ def get_milvus_client() -> Any:
     if it does not exist (dim 384 for all-MiniLM-L6-v2).
     """
     if not MILVUS_URI or not MILVUS_TOKEN:
-        raise ValueError("MILVUS_URI and MILVUS_TOKEN must be set in .env")
+        raise ServiceUnavailableError(
+            "Vector store is not configured. Please set MILVUS_URI and MILVUS_TOKEN in .env."
+        )
 
     from pymilvus import MilvusClient
 
