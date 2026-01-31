@@ -9,24 +9,27 @@ from typing import Any
 
 import httpx
 
-from app.core.config import HF_API_KEY
+from app.core.config import (
+    COLLECTION_NAME,
+    HF_API_KEY,
+    HF_RERANK_MODEL,
+    RERANK_API_TIMEOUT,
+    RERANK_TOP_K,
+    SEARCH_TOP_K,
+)
 from app.services.vector_store import embed_texts, get_milvus_client
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "documents"
-HF_RERANK_MODEL = "BAAI/bge-reranker-base"
-# Use router (api-inference.huggingface.co returns 410 Gone)
 HF_RERANK_URL = f"https://router.huggingface.co/hf-inference/models/{HF_RERANK_MODEL}"
-RERANK_TOP_K = 8
-SEARCH_TOP_K = 100
-API_TIMEOUT = 60.0
 
 
-def search_milvus(query: str, top_k: int = SEARCH_TOP_K) -> list[dict]:
+def search_milvus(query: str, top_k: int | None = None) -> list[dict]:
     """
     Embed query, search Milvus, return structured candidates with text, score, metadata.
     """
+    if top_k is None:
+        top_k = SEARCH_TOP_K
     logger.info("[retrieval:search_milvus] IN  query=%r top_k=%d", query, top_k)
     if not query or not query.strip():
         logger.info("[retrieval:search_milvus] OUT empty query, returning []")
@@ -92,7 +95,7 @@ def rerank_with_hf(query: str, results: list[dict], top_k: int = RERANK_TOP_K) -
     payload = {"inputs": inputs, "options": {"wait_for_model": True}}
 
     try:
-        with httpx.Client(timeout=API_TIMEOUT) as client:
+        with httpx.Client(timeout=RERANK_API_TIMEOUT) as client:
             response = client.post(HF_RERANK_URL, json=payload, headers=headers)
         if response.status_code != 200:
             logger.warning("Reranker API error %s: %s", response.status_code, response.text[:200])

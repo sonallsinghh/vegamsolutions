@@ -11,13 +11,12 @@ from typing import Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.agent.llm import chat_with_tools, chat_with_tools_stream, hf_llm
+from app.agent.llm import chat_with_tools_stream, hf_llm
 from app.agent.tools import AGENT_TOOLS, execute_tool
+from app.core.config import AGENT_MAX_TOKENS, MAX_AGENTIC_ROUNDS, MAX_ITERATIONS
 from app.services.retrieval_service import retrieve_context
 
 logger = logging.getLogger(__name__)
-MAX_ITERATIONS = 2
-MAX_AGENTIC_ROUNDS = 12
 
 
 class AgentState(TypedDict):
@@ -294,73 +293,6 @@ def run_agent_stream(question: str, history: list | None = None):
     logger.info("[run_agent_stream] END")
 
 
-def run_agent_agentic(question: str, history: list | None = None) -> dict:
-    """
-    Run the agent in agentic (tool-calling) mode. The LLM can call tools:
-    search_documents, list_sources, get_chunk, system_stats, current_date, calculator, web_search.
-    Requires OPENAI_API_KEY and openai package. Returns answer and list of tools used.
-    """
-    if not question or not str(question).strip():
-        raise ValueError("question is required")
-    q = str(question).strip()
-    hist = history if history is not None else []
-    logger.info("[run_agent_agentic] START question=%r history_len=%d", q, len(hist))
-
-    system_msg = (
-        "You are a professional assistant with access to a set of tools. Your primary responsibility is to answer "
-        "the user's questions accurately and completely, using the tools at your disposal.\n\n"
-        "Rule: For every user question, you MUST call search_documents first with an appropriate search query. "
-        "The user has a knowledge base of uploaded documents; always check it before using other tools or your own "
-        "knowledge. Only if search_documents returns no relevant results (or the retrieved content clearly does not "
-        "answer the question) may you then use other tools: get_weather for weather in a place; web_search for "
-        "current or external information; calculator for numeric expressions; current_date for date/time; list_sources "
-        "or system_stats to inspect the knowledge base; get_chunk to fetch a chunk by id.\n\n"
-        "When a location is ambiguous (e.g. a place name that exists in multiple countries or states), do NOT guess. "
-        "Ask the user a short follow-up question, e.g. \"Which country do you mean?\" or \"Which state or region?\" "
-        "Then use their answer when calling tools. If a tool returns \"No location found\" or similar, ask the user "
-        "to clarify (e.g. \"I couldn't find that place. Could you specify the country or state?\")\n\n"
-        "Provide a clear, well-structured final answer once you have sufficient information. Do not invoke "
-        "additional tools after you have gathered what is needed to answer the question."
-    )
-    messages: list[dict] = [{"role": "system", "content": system_msg}]
-    for m in hist:
-        role = (m.get("role") or "user").strip().lower()
-        content = (m.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            messages.append({"role": role, "content": content})
-    messages.append({"role": "user", "content": q})
-
-    tools_used: list[str] = []
-    for _ in range(MAX_AGENTIC_ROUNDS):
-        content, tool_calls = chat_with_tools(messages, AGENT_TOOLS, max_tokens=512)
-        if content and not tool_calls:
-            answer = content.strip()
-            logger.info("[run_agent_agentic] END answer_len=%d tools_used=%s", len(answer), tools_used)
-            return {"answer": answer, "tools_used": tools_used}
-        if tool_calls:
-            assistant_msg: dict = {"role": "assistant", "content": content or ""}
-            assistant_msg["tool_calls"] = [
-                {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc.get("arguments") or {})}}
-                for tc in tool_calls
-            ]
-            messages.append(assistant_msg)
-            for tc in tool_calls:
-                name = tc.get("name", "")
-                args = tc.get("arguments") or {}
-                result = execute_tool(name, args)
-                tools_used.append(name)
-                messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
-            continue
-        if content:
-            answer = content.strip()
-            logger.info("[run_agent_agentic] END answer_len=%d tools_used=%s", len(answer), tools_used)
-            return {"answer": answer, "tools_used": tools_used}
-        break
-    answer = "I couldn't complete the request (tool-calling requires OpenAI and OPENAI_API_KEY)."
-    logger.info("[run_agent_agentic] END fallback tools_used=%s", tools_used)
-    return {"answer": answer, "tools_used": tools_used}
-
-
 def run_agent_agentic_stream(question: str, history: list | None = None):
     """
     Run the agent in agentic (tool-calling) mode and yield SSE-friendly events.
@@ -405,7 +337,7 @@ def run_agent_agentic_stream(question: str, history: list | None = None):
             content_from_stream = ""
             tool_calls_from_stream: list[dict] | None = None
             streamed_content: list[str] = []
-            for item in chat_with_tools_stream(messages, AGENT_TOOLS, max_tokens=512):
+            for item in chat_with_tools_stream(messages, AGENT_TOOLS, max_tokens=AGENT_MAX_TOKENS):
                 if item[0] == "content_delta":
                     streamed_content.append(item[1])
                     yield {"event": "answer_delta", "content": item[1]}

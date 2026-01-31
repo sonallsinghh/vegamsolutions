@@ -13,13 +13,13 @@ from typing import Any
 
 import httpx
 
+from app.core.config import (
+    OPEN_METEO_FORECAST,
+    OPEN_METEO_GEOCODE,
+    TOOLS_HTTP_TIMEOUT,
+)
 from app.services.retrieval_service import retrieve_context
 from app.services.vector_store import get_chunk_by_id, get_collection_stats, list_sources
-
-# Open-Meteo: free weather API, no key. https://open-meteo.com/en/docs
-OPEN_METEO_GEOCODE = "https://geocoding-api.open-meteo.com/v1/search"
-OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
-HTTP_TIMEOUT = 15.0
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +197,9 @@ def _get_weather_impl(city: str, country: str | None = None, region: str | None 
         parts.append(country.strip())
     query = ", ".join(parts) if len(parts) > 1 else city
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
-            geo = client.get(OPEN_METEO_GEOCODE, params={"name": query, "count": 1})
+        with httpx.Client(timeout=TOOLS_HTTP_TIMEOUT) as client:
+            geo = client.get(
+                OPEN_METEO_GEOCODE, params={"name": query, "count": 1})
             if geo.status_code != 200:
                 return f"Weather API error: geocode returned {geo.status_code}."
             geo_data = geo.json()

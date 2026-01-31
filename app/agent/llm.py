@@ -10,17 +10,15 @@ from typing import Any
 import httpx
 
 from app.core.config import (
+    HF_CHAT_URL,
     HF_API_KEY,
     HF_LLM_MODEL,
+    LLM_API_TIMEOUT,
     OPENAI_API_KEY,
     OPENAI_LLM_MODEL,
 )
 
 logger = logging.getLogger(__name__)
-API_TIMEOUT = 60.0
-
-# Hugging Face router (fallback)
-HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 
 
 def _call_openai(prompt: str, max_new_tokens: int) -> str:
@@ -57,7 +55,7 @@ def _call_hf(prompt: str, max_new_tokens: int) -> str:
         "max_tokens": max_new_tokens,
     }
     try:
-        with httpx.Client(timeout=API_TIMEOUT) as client:
+        with httpx.Client(timeout=LLM_API_TIMEOUT) as client:
             response = client.post(HF_CHAT_URL, json=payload, headers=headers)
         if response.status_code != 200:
             logger.warning("[llm:hf] HF LLM error %s: %s", response.status_code, response.text[:200])

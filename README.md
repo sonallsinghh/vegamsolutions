@@ -5,7 +5,7 @@ An **Agentic RAG** (Retrieval-Augmented Generation) application: upload document
 ## Features
 
 - **Document ingestion**: Upload `.txt`, `.pdf`, `.xlsx`, `.xls`; automatic chunking, cleaning, embedding (Hugging Face), and storage in **Milvus Cloud**.
-- **Agentic query**: LangGraph-based agent with **tool-calling** (OpenAI or Ollama): `search_documents`, `list_sources`, `get_chunk`, `system_stats`, `current_date`, `calculator`, `get_weather`, `web_search`.
+- **Agentic query**: LangGraph-based agent with **tool-calling** (OpenAI): `search_documents`, `list_sources`, `get_chunk`, `system_stats`, `current_date`, `calculator`, `get_weather`, `web_search`.
 - **RAG pipeline** (optional): Query rewrite → semantic retrieval (Milvus) → keyword boost → HF rerank → context analysis → answer generation; up to 2 retrieval passes.
 - **Session-aware chat**: Server-side chat history by `session_id`; supports multi-turn context.
 - **Streaming**: SSE streaming for agent responses (`/query/stream`).
@@ -18,12 +18,12 @@ An **Agentic RAG** (Retrieval-Augmented Generation) application: upload document
 |-------|------------|
 | API | FastAPI, uvicorn |
 | UI | Streamlit |
-| Agent | LangGraph, tool-calling (OpenAI / Ollama) |
+| Agent | LangGraph, tool-calling (OpenAI) |
 | Embeddings | Hugging Face Inference API (`sentence-transformers/all-MiniLM-L6-v2`) |
 | Rerank | Hugging Face (`BAAI/bge-reranker-base`) |
 | Vector DB | Milvus Cloud (Zilliz) |
-| LLM (simple prompts) | Ollama → OpenAI → Hugging Face |
-| LLM (tool-calling) | Ollama → OpenAI |
+| LLM (simple prompts) | OpenAI → Hugging Face |
+| LLM (tool-calling) | OpenAI |
 
 ## Environment setup
 
@@ -40,11 +40,9 @@ An **Agentic RAG** (Retrieval-Augmented Generation) application: upload document
    | `MILVUS_URI` | Milvus Cloud cluster URI (e.g. `https://xxx.api.gcp-us-west1.zillizcloud.com:19530`) |
    | `MILVUS_TOKEN` | Milvus Cloud API token or `username:password` |
    | `HF_API_KEY` | Hugging Face API key (embeddings, rerank, optional LLM fallback) |
-   | `OPENAI_API_KEY` | OpenAI API key (required for agentic tool-calling if Ollama is not used) |
-   | `OLLAMA_BASE_URL` | Optional; e.g. `http://localhost:11434` (Ollama); when set, simple prompts and tool-calling try Ollama first |
-   | `OLLAMA_MODEL` | Optional; e.g. `llama3` |
+   | `OPENAI_API_KEY` | OpenAI API key (required for agentic tool-calling) |
    | `OPENAI_LLM_MODEL` | Optional; default `gpt-4o-mini` |
-   | `HF_LLM_MODEL` | Optional; used when OpenAI is not set |
+   | `HF_LLM_MODEL` | Optional; used when OpenAI is not set (fallback LLM) |
 
    **Do not commit `.env`** — it is in `.gitignore`. Use `.env.example` as a template.
 
@@ -57,8 +55,6 @@ An **Agentic RAG** (Retrieval-Augmented Generation) application: upload document
    Key packages: `fastapi`, `uvicorn`, `streamlit`, `langgraph`, `pymilvus`, `python-dotenv`, `openai`, `httpx`, `pypdf`, `openpyxl`, `pandas`, `pytest`. Optional: `ddgs` for `web_search` tool.
 
 3. **Milvus**: On first run, the app creates the `documents` collection if missing. Ensure `MILVUS_URI` and `MILVUS_TOKEN` are set or connection will fail.
-
-4. **Ollama** (optional): Install from [ollama.com](https://ollama.com/download), then e.g. `ollama pull llama3`. If `OLLAMA_BASE_URL` is set, the agent uses Ollama first for tool-calling and simple prompts.
 
 ## SQLite upload DB
 
@@ -78,6 +74,15 @@ sqlite3 data/uploads.db "SELECT * FROM uploads;"
 
 Or open `data/uploads.db` in a SQLite GUI (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 
+**Seed DB for demos/tests:** From project root, run:
+
+```bash
+python scripts/seed_upload_db.py          # append seed paths
+python scripts/seed_upload_db.py --reset # clear then seed
+```
+
+Edit `scripts/seed_upload_db.py` and change `SEED_PATHS` to match your demo files under `data/uploads/`.
+
 ## Project structure
 
 ```
@@ -89,8 +94,8 @@ VegamSolutions/
 │   │   ├── routes.py           # All HTTP routes (system, ingestion, query, stream)
 │   │   └── handlers.py         # Upload handler (HTTP → services)
 │   ├── agent/
-│   │   ├── graph.py            # LangGraph: rewrite → retrieve → analyze → generate (RAG); agentic loop
-│   │   ├── llm.py              # LLM routing: Ollama → OpenAI → HF (prompts + tool-calling)
+│   │   ├── graph.py            # LangGraph: rewrite → retrieve → analyze → generate (RAG); agentic stream
+│   │   ├── llm.py              # LLM: OpenAI → HF (prompts + tool-calling stream)
 │   │   └── tools.py            # Tool definitions + execution (search_documents, calculator, weather, etc.)
 │   ├── core/
 │   │   ├── config.py           # Env and app constants
@@ -99,7 +104,7 @@ VegamSolutions/
 │   ├── ingest/
 │   │   └── loader.py           # File → text (txt, pdf, xlsx, xls)
 │   ├── llm/
-│   │   └── ollama_client.py    # Ollama chat and tool-calling client
+│   │   └── __init__.py         # (Agent LLM in app.agent.llm)
 │   ├── mcp/
 │   │   └── server.py           # MCP-style HTTP tools: search_documents, list_sources, get_chunk, system_stats
 │   ├── schemas/
@@ -113,7 +118,9 @@ VegamSolutions/
 │       └── agent_service.py    # (if used) orchestration around agent
 ├── data/
 │   ├── uploads/                # Persisted uploaded files
-│   └── uploads.db               # SQLite DB of upload paths (created on first upload)
+│   └── uploads.db              # SQLite DB of upload paths (created on first upload)
+├── scripts/
+│   └── seed_upload_db.py       # Seed uploads DB for demos/tests
 ├── tests/
 │   ├── test_text_processing.py
 │   └── test_mcp_integration.py
