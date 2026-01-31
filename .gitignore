@@ -8,7 +8,15 @@ venv/
 .venv/
 env/
 .env
-
+__pycache__/
+__init__.py
+__init__.pyc
+__init__.pyo
+__init__.pyd
+__init__.pyw
+__init__.pyz
+__init__.pywz
+__init__.pyz
 # IDE
 .idea/
 .vscode/

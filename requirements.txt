@@ -2,3 +2,7 @@ streamlit
 langchain
 pydantic
 numpy
+pypdf
+openpyxl
+pandas
+xlrd
