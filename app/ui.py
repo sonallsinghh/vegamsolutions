@@ -142,6 +142,8 @@ if prompt := st.chat_input("Ask a question about your documents"):
                     ws = websocket.create_connection(WS_URL)
                     try:
                         ws.send(json.dumps({"question": prompt, "session_id": session_id}))
+                        tools_used_ws = []
+                        answer_so_far = ""
                         while True:
                             msg_data = ws.recv()
                             if not msg_data:
@@ -149,20 +151,30 @@ if prompt := st.chat_input("Ask a question about your documents"):
                             event = json.loads(msg_data)
                             ev = event.get("event", "")
                             data = event.get("data", "")
-                            if ev == "rewrite":
-                                status_placeholder.caption(f"Rewrite: {data[:80]}..." if len(data) > 80 else f"Rewrite: {data}")
-                            elif ev == "retrieval":
-                                status_placeholder.caption(data)
-                            elif ev == "analysis":
-                                status_placeholder.caption(data)
+                            if ev == "tool":
+                                tools_used_ws.append(data)
+                                status_placeholder.caption(f"Calling {data}...")
+                            elif ev == "answer_delta":
+                                answer_so_far += data
+                                answer_placeholder.markdown(answer_so_far)
                             elif ev == "answer":
                                 answer = data
                                 answer_placeholder.markdown(data)
+                                if tools_used_ws:
+                                    answer_placeholder.caption(f"Tools used: {', '.join(tools_used_ws)}")
+                                break
+                            elif ev == "answer_done":
+                                if answer_so_far:
+                                    answer = answer_so_far
                                 break
                             elif ev == "error":
                                 answer = f"Error: {data}"
                                 answer_placeholder.error(data)
                                 break
+                        if answer_so_far and not answer:
+                            answer = answer_so_far
+                        if tools_used_ws and answer:
+                            answer_placeholder.caption(f"Tools used: {', '.join(tools_used_ws)}")
                     finally:
                         ws.close()
         except Exception as e:

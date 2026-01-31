@@ -11,7 +11,7 @@ from typing import Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.agent.llm import chat_with_tools, hf_llm
+from app.agent.llm import chat_with_tools, chat_with_tools_stream, hf_llm
 from app.agent.tools import AGENT_TOOLS, execute_tool
 from app.services.retrieval_service import retrieve_context
 
@@ -307,9 +307,20 @@ def run_agent_agentic(question: str, history: list | None = None) -> dict:
     logger.info("[run_agent_agentic] START question=%r history_len=%d", q, len(hist))
 
     system_msg = (
-        "You are a helpful assistant with access to tools. Use them when needed to answer the user. "
-        "Answer based on tool results and conversation history. When you have enough information, "
-        "reply with a clear final answer and do not call more tools."
+        "You are a professional assistant with access to a set of tools. Your primary responsibility is to answer "
+        "the user's questions accurately and completely, using the tools at your disposal.\n\n"
+        "Rule: For every user question, you MUST call search_documents first with an appropriate search query. "
+        "The user has a knowledge base of uploaded documents; always check it before using other tools or your own "
+        "knowledge. Only if search_documents returns no relevant results (or the retrieved content clearly does not "
+        "answer the question) may you then use other tools: get_weather for weather in a place; web_search for "
+        "current or external information; calculator for numeric expressions; current_date for date/time; list_sources "
+        "or system_stats to inspect the knowledge base; get_chunk to fetch a chunk by id.\n\n"
+        "When a location is ambiguous (e.g. a place name that exists in multiple countries or states), do NOT guess. "
+        "Ask the user a short follow-up question, e.g. \"Which country do you mean?\" or \"Which state or region?\" "
+        "Then use their answer when calling tools. If a tool returns \"No location found\" or similar, ask the user "
+        "to clarify (e.g. \"I couldn't find that place. Could you specify the country or state?\")\n\n"
+        "Provide a clear, well-structured final answer once you have sufficient information. Do not invoke "
+        "additional tools after you have gathered what is needed to answer the question."
     )
     messages: list[dict] = [{"role": "system", "content": system_msg}]
     for m in hist:
@@ -348,3 +359,85 @@ def run_agent_agentic(question: str, history: list | None = None) -> dict:
     answer = "I couldn't complete the request (tool-calling requires OpenAI and OPENAI_API_KEY)."
     logger.info("[run_agent_agentic] END fallback tools_used=%s", tools_used)
     return {"answer": answer, "tools_used": tools_used}
+
+
+def run_agent_agentic_stream(question: str, history: list | None = None):
+    """
+    Run the agent in agentic (tool-calling) mode and yield streaming events for WebSocket.
+    Yields: {"event": "tool", "data": tool_name} for each tool call, then {"event": "answer", "data": answer}.
+    """
+    if not question or not str(question).strip():
+        yield {"event": "error", "data": "question is required"}
+        return
+    q = str(question).strip()
+    hist = history if history is not None else []
+    logger.info("[run_agent_agentic_stream] START question=%r history_len=%d", q, len(hist))
+
+    system_msg = (
+        "You are a professional assistant with access to a set of tools. Your primary responsibility is to answer "
+        "the user's questions accurately and completely, using the tools at your disposal.\n\n"
+        "Rule: For every user question, you MUST call search_documents first with an appropriate search query. "
+        "The user has a knowledge base of uploaded documents; always check it before using other tools or your own "
+        "knowledge. Only if search_documents returns no relevant results (or the retrieved content clearly does not "
+        "answer the question) may you then use other tools: get_weather for weather in a place; web_search for "
+        "current or external information; calculator for numeric expressions; current_date for date/time; list_sources "
+        "or system_stats to inspect the knowledge base; get_chunk to fetch a chunk by id.\n\n"
+        "When a location is ambiguous (e.g. a place name that exists in multiple countries or states), do NOT guess. "
+        "Ask the user a short follow-up question, e.g. \"Which country do you mean?\" or \"Which state or region?\" "
+        "Then use their answer when calling tools. If a tool returns \"No location found\" or similar, ask the user "
+        "to clarify (e.g. \"I couldn't find that place. Could you specify the country or state?\")\n\n"
+        "Provide a clear, well-structured final answer once you have sufficient information. Do not invoke "
+        "additional tools after you have gathered what is needed to answer the question."
+    )
+    messages: list[dict] = [{"role": "system", "content": system_msg}]
+    for m in hist:
+        role = (m.get("role") or "user").strip().lower()
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": q})
+
+    tools_used: list[str] = []
+    try:
+        for _ in range(MAX_AGENTIC_ROUNDS):
+            content_from_stream = ""
+            tool_calls_from_stream: list[dict] | None = None
+            streamed_content: list[str] = []
+            for item in chat_with_tools_stream(messages, AGENT_TOOLS, max_tokens=512):
+                if item[0] == "content_delta":
+                    streamed_content.append(item[1])
+                    yield {"event": "answer_delta", "data": item[1]}
+                elif item[0] == "content_done":
+                    full_answer = "".join(streamed_content).strip()
+                    yield {"event": "answer", "data": full_answer}
+                    yield {"event": "answer_done", "data": ""}
+                    logger.info("[run_agent_agentic_stream] END (streamed) tools_used=%s", tools_used)
+                    return
+                elif item[0] == "tool_calls":
+                    tool_calls_from_stream = item[1]
+                    content_from_stream = (item[2] or "").strip()
+                    break
+            if not tool_calls_from_stream:
+                break
+            tool_calls = tool_calls_from_stream
+            assistant_msg: dict = {"role": "assistant", "content": content_from_stream or ""}
+            assistant_msg["tool_calls"] = [
+                {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc.get("arguments") or {})}}
+                for tc in tool_calls
+            ]
+            messages.append(assistant_msg)
+            for tc in tool_calls:
+                name = tc.get("name", "")
+                args = tc.get("arguments") or {}
+                yield {"event": "tool", "data": name}
+                result = execute_tool(name, args)
+                tools_used.append(name)
+                messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
+        else:
+            return
+        answer = "I couldn't complete the request (tool-calling requires OpenAI and OPENAI_API_KEY)."
+        yield {"event": "answer", "data": answer}
+    except Exception as e:
+        logger.exception("[run_agent_agentic_stream] Agent stream failed")
+        yield {"event": "error", "data": str(e)}
+    logger.info("[run_agent_agentic_stream] END")

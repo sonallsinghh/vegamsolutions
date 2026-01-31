@@ -40,6 +40,27 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def clear_upload_dir() -> int:
+    """
+    Delete all files in data/uploads/. Returns the number of files removed.
+    Used when clearing the knowledge base so uploads are wiped too.
+    """
+    root = _project_root() / UPLOAD_DIR_NAME
+    if not root.is_dir():
+        return 0
+    removed = 0
+    for p in root.iterdir():
+        if p.is_file():
+            try:
+                p.unlink()
+                removed += 1
+            except OSError as e:
+                logger.warning("Failed to remove %s: %s", p, e)
+    if removed:
+        logger.info("Cleared %d files from %s", removed, UPLOAD_DIR_NAME)
+    return removed
+
+
 def _sanitize_filename(filename: str) -> str:
     """Sanitize filename to prevent path traversal (../). Returns safe basename."""
     if not filename or not filename.strip():

@@ -141,3 +141,69 @@ def chat_with_tools(
     if content:
         logger.info("[llm:chat_with_tools] OUT content_len=%d", len(content))
     return content, tool_calls if tool_calls else None
+
+
+def chat_with_tools_stream(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    max_tokens: int = 512,
+):
+    """
+    Call OpenAI chat with tools and stream the response. Yields:
+    - ('content_delta', str) for each token of the final answer;
+    - ('content_done',) when the answer is complete (no tool_calls);
+    - ('tool_calls', list[dict], content_str) when the model called tools (content_str may be empty).
+    Requires OPENAI_API_KEY and openai package.
+    """
+    if not OPENAI_API_KEY:
+        logger.warning("[llm] chat_with_tools_stream requires OPENAI_API_KEY")
+        return
+    try:
+        from openai import OpenAI
+    except ImportError:
+        logger.warning("[llm] chat_with_tools_stream requires openai package")
+        return
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    stream = client.chat.completions.create(
+        model=OPENAI_LLM_MODEL,
+        messages=messages,
+        tools=tools,
+        max_tokens=max_tokens,
+        stream=True,
+    )
+    content_parts: list[str] = []
+    tool_calls_accum: dict[int, dict[str, Any]] = {}
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        d = chunk.choices[0].delta
+        if getattr(d, "content", None) and d.content:
+            content_parts.append(d.content)
+            yield ("content_delta", d.content)
+        if getattr(d, "tool_calls", None) and d.tool_calls:
+            for tc in d.tool_calls:
+                idx = getattr(tc, "index", 0)
+                if idx not in tool_calls_accum:
+                    tool_calls_accum[idx] = {"id": "", "name": "", "arguments": ""}
+                if getattr(tc, "id", None):
+                    tool_calls_accum[idx]["id"] = tc.id
+                if getattr(tc, "function", None) and tc.function:
+                    if getattr(tc.function, "name", None):
+                        tool_calls_accum[idx]["name"] = tc.function.name
+                    if getattr(tc.function, "arguments", None) and tc.function.arguments:
+                        tool_calls_accum[idx]["arguments"] += tc.function.arguments
+    full_content = "".join(content_parts)
+    if tool_calls_accum:
+        sorted_tcs = [tool_calls_accum[i] for i in sorted(tool_calls_accum)]
+        tool_calls_list = []
+        for t in sorted_tcs:
+            try:
+                args = json.loads(t["arguments"]) if t["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls_list.append({"id": t["id"], "name": t["name"], "arguments": args})
+        logger.info("[llm:chat_with_tools_stream] OUT tool_calls=%s", [x["name"] for x in tool_calls_list])
+        yield ("tool_calls", tool_calls_list, full_content)
+    else:
+        logger.info("[llm:chat_with_tools_stream] OUT content_done len=%d", len(full_content))
+        yield ("content_done",)
