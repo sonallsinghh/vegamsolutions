@@ -1,5 +1,5 @@
 # Run from project root: streamlit run app/ui.py
-# UI talks to backend API (POST /upload, POST /query or WebSocket /ws/query). Chat history is stored on server by session_id.
+# UI talks to backend API (POST /upload, POST /query, POST /query/stream for SSE). Chat history is stored on server by session_id.
 
 import json
 import os
@@ -17,11 +17,9 @@ for _root in (_root_from_file, _cwd):
 
 import streamlit as st
 import requests
-import websocket
 
 # Backend config
 API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
-WS_URL = os.environ.get("WS_URL", "ws://localhost:8000/ws/query")
 
 st.title("Agentic RAG System")
 
@@ -95,13 +93,6 @@ if st.button("New chat", key="new_chat"):
     st.session_state.messages = []
     st.rerun()
 
-# Toggle REST vs WebSocket (selection stored in session_state.connection_mode)
-st.radio(
-    "Connection",
-    options=["REST API", "WebSocket"],
-    horizontal=True,
-    key="connection_mode",
-)
 st.caption(f"Session: `{st.session_state.chat_session_id[:8]}...` (history stored on server)")
 
 # Show previous messages (local display only)
@@ -113,70 +104,57 @@ for msg in st.session_state.messages:
 if prompt := st.chat_input("Ask a question about your documents"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     session_id = st.session_state.chat_session_id
-    use_rest = st.session_state.get("connection_mode") == "REST API"
 
     with st.chat_message("assistant"):
-        status_placeholder = st.empty()
         answer_placeholder = st.empty()
+        tools_caption = st.empty()
         answer = ""
+        tools_used: list[str] = []
         try:
-            if use_rest:
-                with st.spinner("Thinking..."):
-                    r = requests.post(
-                        f"{API_BASE}/query",
-                        json={"question": prompt, "session_id": session_id},
-                        timeout=90,
-                    )
-                    if r.ok:
-                        data = r.json()
-                        answer = data.get("answer") or "No answer."
-                        answer_placeholder.markdown(answer)
-                        tools_used = data.get("tools_used") or []
-                        if tools_used:
-                            answer_placeholder.caption(f"Tools used: {', '.join(tools_used)}")
-                    else:
-                        answer = f"Error: {r.status_code} — {r.text[:200]}"
-                        answer_placeholder.error(answer)
+            r = requests.post(
+                f"{API_BASE}/query/stream",
+                json={"question": prompt, "session_id": session_id},
+                stream=True,
+                timeout=90,
+            )
+            if not r.ok:
+                answer = f"Error: {r.status_code} — {r.text[:200]}"
+                answer_placeholder.error(answer)
             else:
-                with st.spinner("Thinking..."):
-                    ws = websocket.create_connection(WS_URL)
-                    try:
-                        ws.send(json.dumps({"question": prompt, "session_id": session_id}))
-                        tools_used_ws = []
-                        answer_so_far = ""
-                        while True:
-                            msg_data = ws.recv()
-                            if not msg_data:
-                                break
-                            event = json.loads(msg_data)
-                            ev = event.get("event", "")
-                            data = event.get("data", "")
-                            if ev == "tool":
-                                tools_used_ws.append(data)
-                                status_placeholder.caption(f"Calling {data}...")
-                            elif ev == "answer_delta":
-                                answer_so_far += data
-                                answer_placeholder.markdown(answer_so_far)
-                            elif ev == "answer":
-                                answer = data
-                                answer_placeholder.markdown(data)
-                                if tools_used_ws:
-                                    answer_placeholder.caption(f"Tools used: {', '.join(tools_used_ws)}")
-                                break
-                            elif ev == "answer_done":
-                                if answer_so_far:
-                                    answer = answer_so_far
-                                break
-                            elif ev == "error":
-                                answer = f"Error: {data}"
-                                answer_placeholder.error(data)
-                                break
-                        if answer_so_far and not answer:
-                            answer = answer_so_far
-                        if tools_used_ws and answer:
-                            answer_placeholder.caption(f"Tools used: {', '.join(tools_used_ws)}")
-                    finally:
-                        ws.close()
+                current_event = None
+                accumulated = []
+                for line in r.iter_lines(decode_unicode=True):
+                    if line is None:
+                        continue
+                    if line.startswith("event:"):
+                        current_event = line[6:].strip()
+                    elif line.startswith("data:") and current_event:
+                        try:
+                            data = json.loads(line[5:].strip())
+                        except json.JSONDecodeError:
+                            data = {}
+                        if current_event == "answer_delta":
+                            content = data.get("content", "")
+                            if content:
+                                accumulated.append(content)
+                                answer_placeholder.markdown("".join(accumulated))
+                        elif current_event == "tool":
+                            name = data.get("name", "")
+                            if name:
+                                tools_used.append(name)
+                                tools_caption.caption(f"Tools used: {', '.join(tools_used)}")
+                        elif current_event == "done":
+                            answer = data.get("answer", "") or "".join(accumulated)
+                            tools_used = data.get("tools_used", []) or tools_used
+                            if answer:
+                                answer_placeholder.markdown(answer)
+                            if tools_used:
+                                tools_caption.caption(f"Tools used: {', '.join(tools_used)}")
+                        elif current_event == "error":
+                            msg = data.get("message", "Unknown error")
+                            answer_placeholder.error(msg)
+                            answer = msg
+                answer = answer or "".join(accumulated) or "No answer."
         except Exception as e:
             answer = f"Connection failed: {e}"
             answer_placeholder.error(answer)

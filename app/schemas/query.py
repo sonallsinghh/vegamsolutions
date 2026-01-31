@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
-    """Request body for POST /query and WebSocket /ws/query. History is stored server-side by session_id."""
+    """Request body for POST /query. History is stored server-side by session_id."""
 
     question: str = Field(..., min_length=1, description="User question for the agent.")
     session_id: str = Field(..., min_length=1, description="Session ID; chat history is stored on the server for this session.")

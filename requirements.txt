@@ -15,7 +15,6 @@ python-dotenv
 httpx
 openai
 requests
-websocket-client
 pytest
 # Optional: for agentic web_search tool (pip install ddgs)
 ddgs

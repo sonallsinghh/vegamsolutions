@@ -153,3 +153,82 @@ def store_chunks(chunks: list[dict]) -> None:
     client.insert(collection_name=COLLECTION_NAME, data=rows)
     client.flush(collection_name=COLLECTION_NAME)
     logger.info("Embedded and stored %d chunks", len(chunks))
+
+
+def list_sources(limit: int = 16_384) -> list[str]:
+    """
+    Return distinct document source names in the collection (document introspection).
+    Used by MCP list_sources tool.
+    """
+    client = get_milvus_client()
+    if not client.has_collection(COLLECTION_NAME):
+        return []
+    results = client.query(
+        collection_name=COLLECTION_NAME,
+        filter="",
+        limit=limit,
+        output_fields=["source"],
+    )
+    sources = sorted({(r.get("source") or "").strip() for r in results if (r.get("source") or "").strip()})
+    return sources
+
+
+def clear_knowledge_base() -> None:
+    """
+    Remove all data from the knowledge base by dropping the Milvus collection.
+    The collection will be recreated empty on next insert or get_milvus_client() call.
+    """
+    client = get_milvus_client()
+    if client.has_collection(COLLECTION_NAME):
+        client.drop_collection(collection_name=COLLECTION_NAME)
+        logger.info("Knowledge base cleared: collection %s dropped", COLLECTION_NAME)
+
+
+def get_chunk_by_id(chunk_id: int | str) -> dict | None:
+    """
+    Fetch a single chunk by its Milvus primary key (id). Returns dict with id, text, source, chunk_id.
+    Used by MCP get_chunk tool (metadata awareness).
+    """
+    client = get_milvus_client()
+    if not client.has_collection(COLLECTION_NAME):
+        return None
+    try:
+        results = client.get(
+            collection_name=COLLECTION_NAME,
+            ids=[chunk_id],
+            output_fields=["text", "source", "chunk_id"],
+        )
+    except Exception:
+        return None
+    if not results:
+        return None
+    r = results[0]
+    return {
+        "id": r.get("id", chunk_id),
+        "text": r.get("text", ""),
+        "source": r.get("source", ""),
+        "chunk_id": r.get("chunk_id", 0),
+    }
+
+
+def get_collection_stats() -> dict:
+    """
+    Return knowledge-base stats: total chunks, source count, sources list, collection name.
+    Used by MCP system_stats tool (system observability).
+    """
+    client = get_milvus_client()
+    if not client.has_collection(COLLECTION_NAME):
+        return {
+            "collection_name": COLLECTION_NAME,
+            "total_chunks": 0,
+            "source_count": 0,
+            "sources": [],
+        }
+    total = client.num_entities(collection_name=COLLECTION_NAME)
+    sources = list_sources(limit=16_384)
+    return {
+        "collection_name": COLLECTION_NAME,
+        "total_chunks": total,
+        "source_count": len(sources),
+        "sources": sources,
+    }
