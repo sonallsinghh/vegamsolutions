@@ -31,5 +31,14 @@ HF_API_KEY: str = os.getenv("HF_API_KEY", "").strip()
 # Vector collection: default embedding dim (e.g. sentence-transformers/all-MiniLM-L6-v2 = 384)
 VECTOR_DIM: int = 384
 
-# HF LLM for agent (query rewrite, analyze, generate)
-HF_LLM_MODEL: str = os.getenv("HF_LLM_MODEL", "google/flan-t5-large").strip() or "google/flan-t5-large"
+# OpenAI (agent LLM). When set, the agent uses OpenAI instead of Hugging Face.
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_LLM_MODEL: str = (
+    os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+)
+
+# HF LLM for agent (fallback when OPENAI_API_KEY is not set). Router chat completions require a chat model.
+HF_LLM_MODEL: str = (
+    os.getenv("HF_LLM_MODEL", "meta-llama/Llama-3.2-3B-Instruct").strip()
+    or "meta-llama/Llama-3.2-3B-Instruct"
+)

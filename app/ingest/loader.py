@@ -1,11 +1,44 @@
 # Minimal document loader. No embeddings, no vector DB, no chunking.
-# Supports .txt, .pdf, .xlsx, .xls.
+# Supports .txt, .pdf, .xlsx, .xls. Single place for "file/bytes → text".
 
 import io
 import os
+from pathlib import Path
 from typing import List, Tuple
 
-SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".xlsx", ".xls"}
+from app.core.config import ALLOWED_EXTENSIONS
+
+SUPPORTED_EXTENSIONS = ALLOWED_EXTENSIONS
+
+
+def bytes_to_text(raw: bytes, filename: str) -> str:
+    """
+    Convert raw file bytes to text by extension. Single source of truth for
+    .txt, .pdf, .xlsx, .xls parsing. Used by Streamlit loader and ingestion pipeline.
+    """
+    ext = Path(filename).suffix.lower() if filename else ""
+    if ext == ".txt" or not ext:
+        return raw.decode("utf-8", errors="replace")
+    if ext == ".pdf":
+        return _read_pdf(raw)
+    if ext in (".xlsx", ".xls"):
+        return _read_excel(raw)
+    return raw.decode("utf-8", errors="replace")
+
+
+def _read_pdf(raw: bytes) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(raw))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _read_excel(raw: bytes) -> str:
+    import pandas as pd
+    df = pd.read_excel(io.BytesIO(raw), sheet_name=None, header=None)
+    parts = []
+    for sheet_df in df.values():
+        parts.append(sheet_df.astype(str).to_csv(sep=" ", index=False, header=False))
+    return "\n\n".join(parts)
 
 
 def load_files(files) -> Tuple[List[str], List[str]]:
@@ -28,28 +61,8 @@ def load_files(files) -> Tuple[List[str], List[str]]:
         f.seek(0)
         raw = f.read()
         try:
-            if ext == ".txt":
-                texts.append(raw.decode("utf-8", errors="replace"))
-            elif ext == ".pdf":
-                texts.append(_read_pdf(raw))
-            elif ext in (".xlsx", ".xls"):
-                texts.append(_read_excel(raw))
+            texts.append(bytes_to_text(raw, name))
         except Exception:
             unsupported.append(name)
 
     return texts, unsupported
-
-
-def _read_pdf(raw: bytes) -> str:
-    from pypdf import PdfReader
-    reader = PdfReader(io.BytesIO(raw))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-
-def _read_excel(raw: bytes) -> str:
-    import pandas as pd
-    df = pd.read_excel(io.BytesIO(raw), sheet_name=None, header=None)
-    parts = []
-    for sheet_name, sheet_df in df.items():
-        parts.append(sheet_df.astype(str).to_csv(sep=" ", index=False, header=False))
-    return "\n\n".join(parts)
