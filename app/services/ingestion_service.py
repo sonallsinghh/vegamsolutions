@@ -171,3 +171,55 @@ async def process_documents(paths: list[str]) -> list[dict]:
     Pipeline runs in thread pool so the event loop is not blocked by disk/CPU work.
     """
     return await asyncio.to_thread(_process_documents_sync, paths)
+
+
+def get_preview(
+    source_name: str,
+    raw_limit: int = 4000,
+    cleaned_limit: int = 4000,
+    max_chunks: int = 10,
+) -> dict | None:
+    """
+    Preview how a document is processed: raw → cleaned → chunks.
+    Used for inspecting data quality. Returns None if file not found.
+
+    Args:
+        source_name: Filename as stored (e.g. from list_sources).
+        raw_limit: Max chars of raw text to return.
+        cleaned_limit: Max chars of cleaned text to return.
+        max_chunks: Max number of chunks to return (first N).
+
+    Returns:
+        Dict with source, raw_excerpt, cleaned_excerpt, chunks (list of {chunk_id, text}),
+        chunk_count, raw_len, cleaned_len; or None if file not found.
+    """
+    if not source_name or not str(source_name).strip():
+        return None
+    safe_name = Path(source_name).name
+    root = _project_root() / UPLOAD_DIR_NAME
+    full_path = root / safe_name
+    if not full_path.is_file():
+        return None
+    try:
+        raw = full_path.read_bytes()
+        text = bytes_to_text(raw, safe_name)
+    except Exception as e:
+        logger.warning("Failed to read %s for preview: %s", safe_name, e)
+        return None
+    raw_excerpt = (text or "")[:raw_limit]
+    cleaned = clean_text(text)
+    cleaned_excerpt = (cleaned or "")[:cleaned_limit]
+    chunks = chunk_text(cleaned, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP)
+    chunk_list = [
+        {"chunk_id": i, "text": c}
+        for i, c in enumerate(chunks[:max_chunks])
+    ]
+    return {
+        "source": safe_name,
+        "raw_excerpt": raw_excerpt,
+        "raw_len": len(text or ""),
+        "cleaned_excerpt": cleaned_excerpt,
+        "cleaned_len": len(cleaned or ""),
+        "chunks": chunk_list,
+        "chunk_count": len(chunks),
+    }
