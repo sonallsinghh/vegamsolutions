@@ -1,6 +1,32 @@
 # VegamSolutions — Agentic RAG
 
-Minimal Agentic RAG app: document upload (PDF, txt, Excel), FastAPI backend, Streamlit UI. Service-layer structure; no embeddings or vector DB yet.
+Minimal Agentic RAG app: document upload (PDF, txt, Excel), FastAPI backend, Streamlit UI. LangGraph + Milvus Cloud skeleton; no embeddings or vector inserts yet.
+
+## Environment setup
+
+1. **Copy env file and fill in secrets**
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Edit `.env` and set:
+
+   - **MILVUS_URI** — Your Milvus Cloud cluster endpoint (e.g. `https://xxx.api.gcp-us-west1.zillizcloud.com:19530`).
+   - **MILVUS_TOKEN** — Milvus Cloud API key or `username:password`.
+   - **HF_API_KEY** — Hugging Face API key (for embeddings / inference later).
+
+2. **Do not commit `.env`** — It is listed in `.gitignore`. Use `.env.example` as a template for others.
+
+3. **Install dependencies**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+   Key deps: `pymilvus` (Milvus Cloud), `langgraph`, `python-dotenv`, `fastapi`, `uvicorn`.
+
+4. **Verify Milvus** — On first run, the app will connect to Milvus and create collection `documents` if missing. Ensure `MILVUS_URI` and `MILVUS_TOKEN` are set or connection will fail.
 
 ## Project structure
 
@@ -61,3 +87,21 @@ streamlit run app/ui.py
 ```bash
 python -m app.main
 ```
+
+## MCP tool server usage
+
+The backend exposes retrieval as an MCP-compatible tool so external agents can call it over HTTP.
+
+- **Endpoint:** `POST /mcp/tools/search_documents`
+- **Request body:** `{"query": "your search question"}`
+- **Response:** `{"results": [{"text": "...", "source": "..."}, ...]}`
+
+Example with `curl`:
+
+```bash
+curl -X POST http://localhost:8000/mcp/tools/search_documents \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is the main topic?"}'
+```
+
+Each item in `results` is a chunk from the document store (semantic search + rerank). Use this endpoint from MCP clients or any agent that expects a standardized tool interface.

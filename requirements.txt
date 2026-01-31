@@ -1,8 +1,16 @@
+fastapi
+uvicorn
 streamlit
 langchain
+langgraph
 pydantic
 numpy
 pypdf
 openpyxl
 pandas
 xlrd
+pymilvus
+python-dotenv
+httpx
+requests
+websocket-client
