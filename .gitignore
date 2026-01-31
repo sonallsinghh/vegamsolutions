@@ -29,3 +29,7 @@ Thumbs.db
 
 # Streamlit
 .streamlit/
+
+# Upload DB (SQLite)
+data/uploads.db
+data/uploads/

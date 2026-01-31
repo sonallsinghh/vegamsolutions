@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from app.api.handlers import handle_upload
 from app.agent.graph import run_agent_agentic, run_agent_agentic_stream
 from app.core.session_store import append_message, get_history
+from app.core.upload_db import clear_all as clear_upload_db, get_all_paths as get_upload_paths
 from app.schemas.query import QueryRequest, QueryResponse
 from app.schemas.upload import UploadResponse
 from app.services.ingestion_service import clear_upload_dir, get_preview
@@ -61,12 +62,29 @@ def preview_source(source: str = "") -> dict:
     return data
 
 
+@router.get(
+    "/uploads",
+    tags=["ingestion"],
+    summary="List stored upload file paths",
+    description="Returns file paths stored in the SQLite upload DB (paths of uploaded files).",
+)
+def get_uploads() -> dict:
+    """Return paths stored in the upload SQLite DB."""
+    try:
+        paths = get_upload_paths()
+    except Exception as e:
+        logger.warning("Failed to list upload paths: %s", e)
+        paths = []
+    return {"paths": paths}
+
+
 @router.delete("/sources", tags=["ingestion"], summary="Clear the knowledge base")
 def delete_sources() -> dict:
-    """Drop the vector store collection and delete all files in data/uploads/."""
+    """Drop the vector store collection, delete all files in data/uploads/, and clear upload DB."""
     try:
         clear_knowledge_base()
         files_removed = clear_upload_dir()
+        clear_upload_db()
         return {"cleared": True, "files_removed": files_removed}
     except Exception as e:
         logger.exception("Failed to clear knowledge base")

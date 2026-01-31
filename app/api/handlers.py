@@ -9,6 +9,7 @@ import asyncio
 
 from fastapi import HTTPException, UploadFile
 
+from app.core.upload_db import add_path
 from app.schemas.upload import UploadResponse
 from app.services.ingestion_service import InvalidFileTypeError, process_documents, save_uploaded_files
 
@@ -37,6 +38,8 @@ async def handle_upload(files: list[UploadFile]) -> UploadResponse:
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Failed to save files: {e!s}") from e
 
+    for path in result.paths:
+        add_path(path)
     if result.paths:
         asyncio.create_task(process_documents(result.paths))
 
