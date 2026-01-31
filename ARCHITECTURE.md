@@ -42,7 +42,7 @@ This document describes the high-level architecture of the Agentic RAG system: c
 │  │ • graph.py: LangGraph RAG (rewrite → retrieve → analyze → generate)          │ │
 │  │             + agentic entry point (run_agent_agentic_stream) — tool-calling   │ │
 │  │               loop                                                            │ │
-│  │ • llm.py:   LLM routing Ollama → OpenAI → HF; chat_with_tools / stream        │ │
+│  │ • llm.py:   LLM: OpenAI → HF; chat_with_tools_stream                            │ │
 │  │ • tools.py: Tool definitions (OpenAI format) + execute_tool (search_docs,     │ │
 │  │             list_sources, get_chunk, system_stats, calculator, weather,       │ │
 │  │             web_search)                                                       │ │
@@ -75,7 +75,6 @@ This document describes the high-level architecture of the Agentic RAG system: c
 │  • Hugging Face: embeddings (all-MiniLM-L6-v2), rerank (bge-reranker-base),       │
 │    optional chat (HF_LLM_MODEL)                                                    │
 │  • OpenAI: agent LLM + tool-calling (gpt-4o-mini default)                         │
-│  • Ollama (optional): local LLM + tool-calling (e.g. llama3)                       │
 │  • Open-Meteo: weather (get_weather tool); optional ddgs: web_search               │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -144,7 +143,7 @@ No session or chat state; stateless tool calls.
 
 ## 4. Configuration and environment
 
-- **config.py** loads `.env` and exposes: `MILVUS_URI`, `MILVUS_TOKEN`, `HF_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OPENAI_LLM_MODEL`, `HF_LLM_MODEL`, chunk size/overlap, allowed extensions, upload dir, vector dimension.
+- **config.py** loads `.env` and exposes: `MILVUS_URI`, `MILVUS_TOKEN`, `HF_API_KEY`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, `HF_LLM_MODEL`, chunk size/overlap, allowed extensions, upload dir, vector dimension, and app constants (timeouts, collection name, embed/rerank models, etc.).
 - All external URLs and keys are read from config; no hardcoded secrets in application code.
 
 ---
@@ -163,6 +162,6 @@ No session or chat state; stateless tool calls.
 | Aspect | Choice |
 |--------|--------|
 | **API** | FastAPI; routes + handlers; optional SSE for /query/stream. |
-| **Agent** | LangGraph (RAG graph) + agentic tool-calling loop (Ollama/OpenAI). |
+| **Agent** | LangGraph (RAG graph) + agentic tool-calling stream (OpenAI). |
 | **Vector store** | Milvus Cloud; 384-d COSINE; HF embeddings. |
 | **Retrieval** | Milvus

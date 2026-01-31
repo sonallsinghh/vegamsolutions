@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.handlers import handle_upload
-from app.agent.graph import run_agent_agentic, run_agent_agentic_stream
+from app.agent.graph import run_agent_agentic_stream
 from app.core.session_store import append_message, get_history
 from app.core.upload_db import clear_all as clear_upload_db, get_all_paths as get_upload_paths
 from app.schemas.query import QueryRequest, QueryResponse
@@ -118,21 +118,31 @@ def post_query(body: QueryRequest) -> QueryResponse:
     history = get_history(body.session_id)
     logger.info("[api:post_query] history_len=%d for session", len(history))
     try:
-        result = run_agent_agentic(body.question, history=history)
+        answer = ""
+        tools_used: list[str] = []
+        for evt in run_agent_agentic_stream(body.question, history=history):
+            event_type = evt.get("event", "")
+            if event_type == "done":
+                answer = evt.get("answer", "")
+                tools_used = evt.get("tools_used", [])
+                break
+            if event_type == "error":
+                raise RuntimeError(evt.get("message", "Agent error"))
+        if not answer and not tools_used:
+            answer = "I couldn't complete the request."
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Agent failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
     append_message(body.session_id, "user", body.question)
-    append_message(body.session_id, "assistant", result["answer"])
-    logger.info("[api:post_query] OUT tools_used=%s answer_len=%d", result.get("tools_used", []), len(result["answer"]))
-    logger.info("[api:post_query] OUT answer=%r", result["answer"])
+    append_message(body.session_id, "assistant", answer)
+    logger.info("[api:post_query] OUT tools_used=%s answer_len=%d", tools_used, len(answer))
     return QueryResponse(
-        answer=result["answer"],
+        answer=answer,
         iterations=0,
         chunks_used=0,
-        tools_used=result.get("tools_used", []),
+        tools_used=tools_used,
     )
 
 

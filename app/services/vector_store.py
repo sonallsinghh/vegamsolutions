@@ -9,30 +9,36 @@ from typing import Any
 
 import httpx
 
-from app.core.config import HF_API_KEY, MILVUS_TOKEN, MILVUS_URI, VECTOR_DIM
+from app.core.config import (
+    COLLECTION_NAME,
+    EMBED_API_TIMEOUT,
+    EMBED_BATCH_SIZE,
+    HF_API_KEY,
+    HF_EMBED_MODEL,
+    MILVUS_TOKEN,
+    MILVUS_URI,
+    VECTOR_DIM,
+)
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "documents"
-
-# Hugging Face Inference API: sentence-transformers/all-MiniLM-L6-v2 (dim 384)
-HF_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 HF_API_URL_ROUTER = (
     "https://router.huggingface.co/hf-inference/models/"
     f"{HF_EMBED_MODEL}/pipeline/feature-extraction"
 )
 HF_API_URL_STANDARD = f"https://api-inference.huggingface.co/models/{HF_EMBED_MODEL}"
-API_TIMEOUT = 30.0
-EMBED_BATCH_SIZE = 32
 
 
-def embed_texts(texts: list[str], batch_size: int = EMBED_BATCH_SIZE) -> list[list[float]]:
+def embed_texts(
+    texts: list[str], batch_size: int | None = None
+) -> list[list[float]]:
     """
     Batch embed texts using Hugging Face Inference API (all-MiniLM-L6-v2).
 
     Batch embeddings reduce latency and improve throughput.
     Returns list of 384-dim vectors (normalized for cosine similarity).
     """
+    batch_size = batch_size if batch_size is not None else EMBED_BATCH_SIZE
     if not texts:
         return []
     if not HF_API_KEY:
@@ -46,7 +52,7 @@ def embed_texts(texts: list[str], batch_size: int = EMBED_BATCH_SIZE) -> list[li
     }
     all_embeddings: list[list[float]] = []
 
-    with httpx.Client(timeout=API_TIMEOUT) as client:
+    with httpx.Client(timeout=EMBED_API_TIMEOUT) as client:
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             payload = {"inputs": batch, "options": {"wait_for_model": True}}

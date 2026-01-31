@@ -32,4 +32,3 @@ Thumbs.db
 
 # Upload DB (SQLite)
 data/uploads.db
-data/uploads/
