@@ -70,11 +70,15 @@ From project root:
 pip install -r requirements.txt
 ```
 
-**API (FastAPI + uvicorn):**
+**API (FastAPI + uvicorn):**  
+Run from the **VegamSolutions** directory so the correct app (with `/upload`, `/query`, MCP) is loaded:
 
 ```bash
+cd VegamSolutions
 uvicorn app.main:app --reload
 ```
+
+If you run `uvicorn app.main:app` from the parent **First500** directory, the wrong app (no `/upload`) will run and uploads will return 404.
 
 **Streamlit UI:**
 
@@ -88,15 +92,26 @@ streamlit run app/ui.py
 python -m app.main
 ```
 
+**Tests:**
+
+```bash
+pytest tests/ -v
+```
+
+Unit tests cover `clean_text` and `chunk_text`; integration tests hit `POST /mcp/tools/search_documents` with a mocked retrieval layer (no Milvus/HF required).
+
 ## MCP tool server usage
 
-The backend exposes retrieval as an MCP-compatible tool so external agents can call it over HTTP.
+The backend exposes retrieval and knowledge-base introspection as MCP-compatible tools over HTTP.
 
-- **Endpoint:** `POST /mcp/tools/search_documents`
-- **Request body:** `{"query": "your search question"}`
-- **Response:** `{"results": [{"text": "...", "source": "..."}, ...]}`
+| Tool | Endpoint | Description |
+|------|----------|-------------|
+| **search_documents** | `POST /mcp/tools/search_documents` | Semantic search + rerank. Body: `{"query": "..."}`. Returns `{"results": [{"id", "text", "source"}, ...]}`. Each `id` is the Milvus primary key so the agent can call **get_chunk**(id). |
+| **list_sources** | `POST /mcp/tools/list_sources` | Document introspection: list source names in the KB. Body: `{}`. Returns `{"sources": ["doc1.txt", ...]}`. |
+| **get_chunk** | `POST /mcp/tools/get_chunk` | Metadata awareness: fetch chunk by Milvus entity id. Body: `{"id": 123}`. Returns `{"chunk": {"id", "text", "source", "chunk_id"}}` or `{"chunk": null}`. |
+| **system_stats** | `POST /mcp/tools/system_stats` | System observability: KB status. Body: `{}`. Returns `{"collection_name", "total_chunks", "source_count", "sources": [...]}`. |
 
-Example with `curl`:
+Example (search):
 
 ```bash
 curl -X POST http://localhost:8000/mcp/tools/search_documents \
@@ -104,4 +119,14 @@ curl -X POST http://localhost:8000/mcp/tools/search_documents \
   -d '{"query": "What is the main topic?"}'
 ```
 
-Each item in `results` is a chunk from the document store (semantic search + rerank). Use this endpoint from MCP clients or any agent that expects a standardized tool interface.
+Example (list sources):
+
+```bash
+curl -X POST http://localhost:8000/mcp/tools/list_sources -H "Content-Type: application/json" -d '{}'
+```
+
+Example (system stats):
+
+```bash
+curl -X POST http://localhost:8000/mcp/tools/system_stats -H "Content-Type: application/json" -d '{}'
+```

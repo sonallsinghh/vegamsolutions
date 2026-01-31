@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 streamlit
 langchain
@@ -13,6 +13,9 @@ xlrd
 pymilvus
 python-dotenv
 httpx
+openai
 requests
 websocket-client
 pytest
+# Optional: for agentic web_search tool (pip install duckduckgo-search)
+duckduckgo-search
