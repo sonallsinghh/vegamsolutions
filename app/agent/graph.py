@@ -363,11 +363,13 @@ def run_agent_agentic(question: str, history: list | None = None) -> dict:
 
 def run_agent_agentic_stream(question: str, history: list | None = None):
     """
-    Run the agent in agentic (tool-calling) mode and yield streaming events for WebSocket.
-    Yields: {"event": "tool", "data": tool_name} for each tool call, then {"event": "answer", "data": answer}.
+    Run the agent in agentic (tool-calling) mode and yield SSE-friendly events.
+    Yields: {"event": "answer_delta", "content": str} for each token;
+            {"event": "tool", "name": str} for each tool call;
+            {"event": "done", "answer": str, "tools_used": list}; or {"event": "error", "message": str}.
     """
     if not question or not str(question).strip():
-        yield {"event": "error", "data": "question is required"}
+        yield {"event": "error", "message": "question is required"}
         return
     q = str(question).strip()
     hist = history if history is not None else []
@@ -406,11 +408,10 @@ def run_agent_agentic_stream(question: str, history: list | None = None):
             for item in chat_with_tools_stream(messages, AGENT_TOOLS, max_tokens=512):
                 if item[0] == "content_delta":
                     streamed_content.append(item[1])
-                    yield {"event": "answer_delta", "data": item[1]}
+                    yield {"event": "answer_delta", "content": item[1]}
                 elif item[0] == "content_done":
                     full_answer = "".join(streamed_content).strip()
-                    yield {"event": "answer", "data": full_answer}
-                    yield {"event": "answer_done", "data": ""}
+                    yield {"event": "done", "answer": full_answer, "tools_used": list(tools_used)}
                     logger.info("[run_agent_agentic_stream] END (streamed) tools_used=%s", tools_used)
                     return
                 elif item[0] == "tool_calls":
@@ -429,15 +430,16 @@ def run_agent_agentic_stream(question: str, history: list | None = None):
             for tc in tool_calls:
                 name = tc.get("name", "")
                 args = tc.get("arguments") or {}
-                yield {"event": "tool", "data": name}
+                yield {"event": "tool", "name": name}
                 result = execute_tool(name, args)
                 tools_used.append(name)
                 messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
         else:
             return
         answer = "I couldn't complete the request (tool-calling requires OpenAI and OPENAI_API_KEY)."
-        yield {"event": "answer", "data": answer}
+        yield {"event": "done", "answer": answer, "tools_used": list(tools_used)}
     except Exception as e:
         logger.exception("[run_agent_agentic_stream] Agent stream failed")
-        yield {"event": "error", "data": str(e)}
+        yield {"event": "error", "message": str(e)}
     logger.info("[run_agent_agentic_stream] END")
+

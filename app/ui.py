@@ -79,6 +79,37 @@ if st.button("Upload", key="upload_btn") and uploaded_files:
 elif uploaded_files:
     st.caption("Click **Upload** to add these files to the knowledge base.")
 
+# Inspect data quality: raw → cleaned → chunks
+with st.expander("Inspect data quality"):
+    st.caption("Preview how a document is processed: raw text, cleaned text, and chunks that go into the index.")
+    try:
+        r_sources = requests.get(f"{API_BASE}/sources", timeout=10)
+        preview_sources = (r_sources.json().get("sources") or []) if r_sources.ok else []
+    except requests.RequestException:
+        preview_sources = []
+    if not preview_sources:
+        st.caption("No documents in the knowledge base. Upload files first.")
+    else:
+        selected = st.selectbox("Choose a document", preview_sources, key="preview_source")
+        if st.button("Preview", key="preview_btn") and selected:
+            try:
+                r = requests.get(f"{API_BASE}/preview", params={"source": selected}, timeout=30)
+                if r.ok:
+                    data = r.json()
+                    st.metric("Chunks", data.get("chunk_count", 0))
+                    st.caption(f"Raw length: {data.get('raw_len', 0)} chars → Cleaned: {data.get('cleaned_len', 0)} chars")
+                    with st.expander("Raw text (excerpt)", expanded=False):
+                        st.text_area("raw", value=data.get("raw_excerpt", ""), height=200, key="preview_raw", disabled=True)
+                    with st.expander("Cleaned text (excerpt)", expanded=False):
+                        st.text_area("cleaned", value=data.get("cleaned_excerpt", ""), height=200, key="preview_cleaned", disabled=True)
+                    st.subheader("Chunks (first 10)")
+                    for c in data.get("chunks", []):
+                        st.text_area(f"Chunk {c.get('chunk_id', 0)}", value=c.get("text", ""), height=120, key=f"preview_chunk_{c.get('chunk_id')}", disabled=True)
+                else:
+                    st.error(f"Preview failed: {r.status_code} — {r.text[:200]}")
+            except Exception as e:
+                st.error(f"Request failed: {e}")
+
 st.divider()
 st.subheader("Chat")
 
@@ -101,7 +132,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # New message from user
-if prompt := st.chat_input("Ask a question about your documents"):
+if prompt := st.chat_input("Ask a question about your documents, weather of a place, or calculate or web search"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     session_id = st.session_state.chat_session_id
 

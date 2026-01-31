@@ -241,31 +241,54 @@ def _get_weather_impl(city: str, country: str | None = None, region: str | None 
         return f"Weather lookup failed: {e}"
 
 
+def _get_result_field(r: Any, *keys: str) -> str:
+    """Get first present key from a result dict or object (ddgs can return either)."""
+    for k in keys:
+        try:
+            if isinstance(r, dict):
+                v = r.get(k)
+            else:
+                v = getattr(r, k, None)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        except Exception:
+            continue
+    return ""
+
+
 def _web_search_impl(query: str) -> str:
-    """Run web search using ddgs (or duckduckgo_search fallback)."""
+    """Run web search using ddgs (or duckduckgo_search fallback). Tries text() then news() if empty."""
     DDGS = None
     try:
         from ddgs import DDGS
     except ImportError:
         try:
-            from duckduckgo_search import DDGS
+            from duckduckgo_search import DDGS  # noqa: F401
         except ImportError:
-            logger.info("[tools] web_search: install ddgs or duckduckgo-search (pip install ddgs)")
+            logger.info("[tools] web_search: install ddgs (pip install ddgs)")
             return "Web search is not available (pip install ddgs)."
     q = (query or "").strip()
     if not q:
         return "Error: empty query"
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.text(q, max_results=5))
+            results = list(ddgs.text(q, max_results=8))
+            if not results:
+                try:
+                    results = list(ddgs.news(q, max_results=6))
+                except Exception:
+                    pass
         if not results:
-            return "No results found."
+            return "No results found for that query. Try rephrasing or a different search."
         lines = []
-        for i, r in enumerate(results[:5], 1):
-            title = (r.get("title") or "").strip()
-            body = (r.get("body") or "").strip()
-            href = (r.get("href") or "").strip()
-            lines.append(f"{i}. {title}\n{body}\nURL: {href}")
+        for i, r in enumerate(results[:8], 1):
+            title = _get_result_field(r, "title")
+            body = _get_result_field(r, "body", "snippet", "description")
+            href = _get_result_field(r, "href", "link", "url")
+            if title or body:
+                lines.append(f"{i}. {title}\n{body}\nURL: {href}" if href else f"{i}. {title}\n{body}")
+        if not lines:
+            return "No results found for that query. Try rephrasing or a different search."
         return "\n\n".join(lines)
     except Exception as e:
         logger.warning("[tools] web_search failed: %s", e)
