@@ -131,12 +131,13 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# New message from user
-if prompt := st.chat_input("Ask a question about your documents, weather of a place, or calculate or web search"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# If we just submitted a query, show it and then show "Thinking..." while waiting for response
+if st.session_state.get("pending_query"):
+    prompt = st.session_state.pending_query
     session_id = st.session_state.chat_session_id
-
     with st.chat_message("assistant"):
+        thinking_placeholder = st.empty()
+        thinking_placeholder.caption("Thinking...")
         answer_placeholder = st.empty()
         tools_caption = st.empty()
         answer = ""
@@ -150,6 +151,7 @@ if prompt := st.chat_input("Ask a question about your documents, weather of a pl
             )
             if not r.ok:
                 answer = f"Error: {r.status_code} — {r.text[:200]}"
+                thinking_placeholder.empty()
                 answer_placeholder.error(answer)
             else:
                 current_event = None
@@ -168,26 +170,38 @@ if prompt := st.chat_input("Ask a question about your documents, weather of a pl
                             content = data.get("content", "")
                             if content:
                                 accumulated.append(content)
+                                thinking_placeholder.empty()
                                 answer_placeholder.markdown("".join(accumulated))
                         elif current_event == "tool":
                             name = data.get("name", "")
                             if name:
                                 tools_used.append(name)
+                                thinking_placeholder.caption("Thinking...")
                                 tools_caption.caption(f"Tools used: {', '.join(tools_used)}")
                         elif current_event == "done":
                             answer = data.get("answer", "") or "".join(accumulated)
                             tools_used = data.get("tools_used", []) or tools_used
+                            thinking_placeholder.empty()
                             if answer:
                                 answer_placeholder.markdown(answer)
                             if tools_used:
                                 tools_caption.caption(f"Tools used: {', '.join(tools_used)}")
                         elif current_event == "error":
                             msg = data.get("message", "Unknown error")
+                            thinking_placeholder.empty()
                             answer_placeholder.error(msg)
                             answer = msg
                 answer = answer or "".join(accumulated) or "No answer."
         except Exception as e:
             answer = f"Connection failed: {e}"
+            thinking_placeholder.empty()
             answer_placeholder.error(answer)
         st.session_state.messages.append({"role": "assistant", "content": answer or "No answer."})
+    del st.session_state["pending_query"]
+    st.rerun()
+
+# New message from user: show it immediately, then rerun so "Thinking..." appears
+if prompt := st.chat_input("Ask a question about your documents, weather of a place, or calculate or web search"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.pending_query = prompt
     st.rerun()
