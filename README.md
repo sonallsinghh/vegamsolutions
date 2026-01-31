@@ -1,10 +1,33 @@
 # VegamSolutions — Agentic RAG
 
-Minimal Agentic RAG app: document upload (PDF, txt, Excel), FastAPI backend, Streamlit UI. LangGraph + Milvus Cloud skeleton; no embeddings or vector inserts yet.
+An **Agentic RAG** (Retrieval-Augmented Generation) application: upload documents (PDF, TXT, Excel), ingest them into a vector store, and query via an AI agent that can use tools (semantic search, calculator, weather, web search) and maintain conversation history.
+
+## Features
+
+- **Document ingestion**: Upload `.txt`, `.pdf`, `.xlsx`, `.xls`; automatic chunking, cleaning, embedding (Hugging Face), and storage in **Milvus Cloud**.
+- **Agentic query**: LangGraph-based agent with **tool-calling** (OpenAI or Ollama): `search_documents`, `list_sources`, `get_chunk`, `system_stats`, `current_date`, `calculator`, `get_weather`, `web_search`.
+- **RAG pipeline** (optional): Query rewrite → semantic retrieval (Milvus) → keyword boost → HF rerank → context analysis → answer generation; up to 2 retrieval passes.
+- **Session-aware chat**: Server-side chat history by `session_id`; supports multi-turn context.
+- **Streaming**: SSE streaming for agent responses (`/query/stream`).
+- **MCP tool server**: HTTP endpoints exposing retrieval and KB introspection for external agents (`/mcp/tools/*`).
+- **Streamlit UI**: Upload files, clear KB, chat with the agent (sync or stream).
+
+## Tech stack
+
+| Layer | Technology |
+|-------|------------|
+| API | FastAPI, uvicorn |
+| UI | Streamlit |
+| Agent | LangGraph, tool-calling (OpenAI / Ollama) |
+| Embeddings | Hugging Face Inference API (`sentence-transformers/all-MiniLM-L6-v2`) |
+| Rerank | Hugging Face (`BAAI/bge-reranker-base`) |
+| Vector DB | Milvus Cloud (Zilliz) |
+| LLM (simple prompts) | Ollama → OpenAI → Hugging Face |
+| LLM (tool-calling) | Ollama → OpenAI |
 
 ## Environment setup
 
-1. **Copy env file and fill in secrets**
+1. **Copy env and set secrets**
 
    ```bash
    cp .env.example .env
@@ -12,121 +35,167 @@ Minimal Agentic RAG app: document upload (PDF, txt, Excel), FastAPI backend, Str
 
    Edit `.env` and set:
 
-   - **MILVUS_URI** — Your Milvus Cloud cluster endpoint (e.g. `https://xxx.api.gcp-us-west1.zillizcloud.com:19530`).
-   - **MILVUS_TOKEN** — Milvus Cloud API key or `username:password`.
-   - **HF_API_KEY** — Hugging Face API key (for embeddings / inference later).
+   | Variable | Description |
+   |----------|-------------|
+   | `MILVUS_URI` | Milvus Cloud cluster URI (e.g. `https://xxx.api.gcp-us-west1.zillizcloud.com:19530`) |
+   | `MILVUS_TOKEN` | Milvus Cloud API token or `username:password` |
+   | `HF_API_KEY` | Hugging Face API key (embeddings, rerank, optional LLM fallback) |
+   | `OPENAI_API_KEY` | OpenAI API key (required for agentic tool-calling if Ollama is not used) |
+   | `OLLAMA_BASE_URL` | Optional; e.g. `http://localhost:11434` (Ollama); when set, simple prompts and tool-calling try Ollama first |
+   | `OLLAMA_MODEL` | Optional; e.g. `llama3` |
+   | `OPENAI_LLM_MODEL` | Optional; default `gpt-4o-mini` |
+   | `HF_LLM_MODEL` | Optional; used when OpenAI is not set |
 
-2. **Do not commit `.env`** — It is listed in `.gitignore`. Use `.env.example` as a template for others.
+   **Do not commit `.env`** — it is in `.gitignore`. Use `.env.example` as a template.
 
-3. **Install dependencies**
+2. **Install dependencies**
 
    ```bash
    pip install -r requirements.txt
    ```
 
-   Key deps: `pymilvus` (Milvus Cloud), `langgraph`, `python-dotenv`, `fastapi`, `uvicorn`.
+   Key packages: `fastapi`, `uvicorn`, `streamlit`, `langgraph`, `pymilvus`, `python-dotenv`, `openai`, `httpx`, `pypdf`, `openpyxl`, `pandas`, `pytest`. Optional: `ddgs` for `web_search` tool.
 
-4. **Verify Milvus** — On first run, the app will connect to Milvus and create collection `documents` if missing. Ensure `MILVUS_URI` and `MILVUS_TOKEN` are set or connection will fail.
+3. **Milvus**: On first run, the app creates the `documents` collection if missing. Ensure `MILVUS_URI` and `MILVUS_TOKEN` are set or connection will fail.
+
+4. **Ollama** (optional): Install from [ollama.com](https://ollama.com/download), then e.g. `ollama pull llama3`. If `OLLAMA_BASE_URL` is set, the agent uses Ollama first for tool-calling and simple prompts.
+
+## SQLite upload DB
+
+Uploaded file paths are stored in a local SQLite database so the app can list them via `GET /uploads` and clear them when the KB is cleared.
+
+| Item | Value |
+|------|--------|
+| **Path** | `data/uploads.db` (under project root) |
+| **Table** | `uploads` |
+| **Columns** | `id` (INTEGER PK), `path` (TEXT), `created_at` (TEXT) |
+
+The file is created on first upload. To view it:
+
+```bash
+sqlite3 data/uploads.db "SELECT * FROM uploads;"
+```
+
+Or open `data/uploads.db` in a SQLite GUI (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 
 ## Project structure
 
 ```
 VegamSolutions/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI app entry: uvicorn app.main:app --reload
-│   ├── ui.py                # Streamlit UI: streamlit run app/ui.py
-│   ├── api/                 # HTTP layer (routes only)
-│   │   ├── __init__.py
-│   │   ├── routes.py        # Aggregates all API routes
-│   │   └── upload.py        # POST /upload
-│   ├── core/                # Config and shared utilities
-│   │   ├── __init__.py
-│   │   └── config.py         # App config (placeholder)
-│   ├── services/            # Business logic (no HTTP)
-│   │   ├── __init__.py
-│   │   ├── ingestion_service.py
-│   │   ├── retrieval_service.py
-│   │   └── agent_service.py
-│   ├── schemas/             # Pydantic request/response models
-│   │   ├── __init__.py
-│   │   └── upload.py
-│   └── ingest/              # Document loading (used by UI / future services)
-│       ├── __init__.py
-│       └── loader.py
+│   ├── main.py                 # FastAPI app: uvicorn app.main:app --reload
+│   ├── ui.py                   # Streamlit UI: streamlit run app/ui.py
+│   ├── api/
+│   │   ├── routes.py           # All HTTP routes (system, ingestion, query, stream)
+│   │   └── handlers.py         # Upload handler (HTTP → services)
+│   ├── agent/
+│   │   ├── graph.py            # LangGraph: rewrite → retrieve → analyze → generate (RAG); agentic loop
+│   │   ├── llm.py              # LLM routing: Ollama → OpenAI → HF (prompts + tool-calling)
+│   │   └── tools.py            # Tool definitions + execution (search_documents, calculator, weather, etc.)
+│   ├── core/
+│   │   ├── config.py           # Env and app constants
+│   │   ├── session_store.py    # In-memory chat history by session_id
+│   │   └── upload_db.py        # SQLite store of uploaded file paths
+│   ├── ingest/
+│   │   └── loader.py           # File → text (txt, pdf, xlsx, xls)
+│   ├── llm/
+│   │   └── ollama_client.py    # Ollama chat and tool-calling client
+│   ├── mcp/
+│   │   └── server.py           # MCP-style HTTP tools: search_documents, list_sources, get_chunk, system_stats
+│   ├── schemas/
+│   │   ├── query.py            # QueryRequest, QueryResponse
+│   │   └── upload.py           # UploadResponse
+│   └── services/
+│       ├── ingestion_service.py # Save files, clean, chunk, store in Milvus
+│       ├── retrieval_service.py # Milvus search → keyword boost → HF rerank
+│       ├── vector_store.py      # Milvus client, HF embeddings, collection ops
+│       ├── text_processing.py   # clean_text, chunk_text
+│       └── agent_service.py    # (if used) orchestration around agent
 ├── data/
-│   └── uploads/             # Persisted uploads
+│   ├── uploads/                # Persisted uploaded files
+│   └── uploads.db               # SQLite DB of upload paths (created on first upload)
 ├── tests/
-│   └── __init__.py
+│   ├── test_text_processing.py
+│   └── test_mcp_integration.py
 ├── requirements.txt
+├── .env.example
 └── README.md
 ```
 
 ## Run
 
-From project root:
-
-```bash
-pip install -r requirements.txt
-```
-
-**API (FastAPI + uvicorn):**  
-Run from the **VegamSolutions** directory so the correct app (with `/upload`, `/query`, MCP) is loaded:
+From the **VegamSolutions** directory:
 
 ```bash
 cd VegamSolutions
+pip install -r requirements.txt
+```
+
+**API (FastAPI)**
+
+```bash
 uvicorn app.main:app --reload
 ```
 
-If you run `uvicorn app.main:app` from the parent **First500** directory, the wrong app (no `/upload`) will run and uploads will return 404.
+API base URL: `http://localhost:8000`. OpenAPI docs: `http://localhost:8000/docs`.
 
-**Streamlit UI:**
+**Streamlit UI**
 
 ```bash
 streamlit run app/ui.py
 ```
 
-**CLI:**
+Set `API_BASE` if the API runs elsewhere (e.g. `export API_BASE=http://localhost:8000`).
 
-```bash
-python -m app.main
-```
-
-**Tests:**
+**Tests**
 
 ```bash
 pytest tests/ -v
 ```
 
-Unit tests cover `clean_text` and `chunk_text`; integration tests hit `POST /mcp/tools/search_documents` with a mocked retrieval layer (no Milvus/HF required).
+Tests cover text processing and MCP integration (e.g. `POST /mcp/tools/search_documents` with mocked retrieval).
 
-## MCP tool server usage
+## API overview
 
-The backend exposes retrieval and knowledge-base introspection as MCP-compatible tools over HTTP.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Health / status |
+| GET | `/health` | Health check |
+| GET | `/sources` | List document sources in the knowledge base |
+| GET | `/preview?source=<name>` | Preview raw → cleaned → chunks for a source |
+| GET | `/uploads` | List stored upload paths (SQLite) |
+| DELETE | `/sources` | Clear KB (drop collection, delete uploads, clear DB) |
+| POST | `/upload` | Upload files (multipart); ingest in background |
+| POST | `/query` | Query agent (sync); body: `question`, `session_id` |
+| POST | `/query/stream` | Query agent with SSE stream |
+
+## MCP tool server
 
 | Tool | Endpoint | Description |
 |------|----------|-------------|
-| **search_documents** | `POST /mcp/tools/search_documents` | Semantic search + rerank. Body: `{"query": "..."}`. Returns `{"results": [{"id", "text", "source"}, ...]}`. Each `id` is the Milvus primary key so the agent can call **get_chunk**(id). |
-| **list_sources** | `POST /mcp/tools/list_sources` | Document introspection: list source names in the KB. Body: `{}`. Returns `{"sources": ["doc1.txt", ...]}`. |
-| **get_chunk** | `POST /mcp/tools/get_chunk` | Metadata awareness: fetch chunk by Milvus entity id. Body: `{"id": 123}`. Returns `{"chunk": {"id", "text", "source", "chunk_id"}}` or `{"chunk": null}`. |
-| **system_stats** | `POST /mcp/tools/system_stats` | System observability: KB status. Body: `{}`. Returns `{"collection_name", "total_chunks", "source_count", "sources": [...]}`. |
+| **search_documents** | `POST /mcp/tools/search_documents` | Semantic search + rerank. Body: `{"query": "..."}`. Returns `{"results": [{"id", "text", "source"}, ...]}`. |
+| **list_sources** | `POST /mcp/tools/list_sources` | List source names in the KB. Body: `{}`. |
+| **get_chunk** | `POST /mcp/tools/get_chunk` | Get chunk by id. Body: `{"id": 123}`. |
+| **system_stats** | `POST /mcp/tools/system_stats` | KB stats: collection name, total chunks, sources. |
 
-Example (search):
+Example:
 
 ```bash
 curl -X POST http://localhost:8000/mcp/tools/search_documents \
   -H "Content-Type: application/json" \
-  -d '{"query": "What is the main topic?"}'
+  -d '{"query": "leave policy"}'
 ```
 
-Example (list sources):
+## Query flow (agentic mode)
 
-```bash
-curl -X POST http://localhost:8000/mcp/tools/list_sources -H "Content-Type: application/json" -d '{}'
-```
+1. Client sends `POST /query` with `question` and `session_id`.
+2. Server loads chat history for `session_id`.
+3. Agent runs in **agentic** mode: system prompt + history + question; LLM (Ollama or OpenAI) may call tools (`search_documents`, `list_sources`, `get_chunk`, `calculator`, `get_weather`, `web_search`, etc.).
+4. Tool results are fed back; loop continues until the LLM returns a final answer (no more tool calls).
+5. Answer and history are stored; response returns `answer` and `tools_used`.
 
-Example (system stats):
+For streaming, use `POST /query/stream`; events include `answer_delta`, `tool`, `done`, `error`.
 
-```bash
-curl -X POST http://localhost:8000/mcp/tools/system_stats -H "Content-Type: application/json" -d '{}'
-```
+## License and attribution
+
+Use `.env.example` as the single reference for required and optional environment variables. Do not commit `.env`.
